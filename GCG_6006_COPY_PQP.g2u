@@ -1,0 +1,248 @@
+Program.Sub.ScreenSU.Start
+Gui.frmMsg..Create
+Gui.frmMsg..Caption("Multiple Templates Exist")
+Gui.frmMsg..Size(12150,2940)
+Gui.frmMsg..MinX(0)
+Gui.frmMsg..MinY(0)
+Gui.frmMsg..Position(0,0)
+Gui.frmMsg..FontSize(10)
+Gui.frmMsg..BackColor(-2147483633)
+Gui.frmMsg..MousePointer(0)
+Gui.frmMsg.lblMsg.Create(Label,"Please select the template to use for this work order:",True,5850,255,0,-30,135,True,0,"Arial",10,-2147483633,0)
+Gui.frmMsg.lblMsg.FontStyle(True,False,False,False,False)
+Gui.frmMsg.GsGcTemplate.Create(GsGridControl)
+Gui.frmMsg.GsGcTemplate.Size(11955,1590)
+Gui.frmMsg.GsGcTemplate.Position(-30,375)
+Gui.frmMsg.GsGcTemplate.Event(RowCellClick,GsGcTemplate_RowCellClick)
+Gui.frmMsg.cmdOK.Create(Button)
+Gui.frmMsg.cmdOK.Size(2100,375)
+Gui.frmMsg.cmdOK.Position(9825,2010)
+Gui.frmMsg.cmdOK.Anchor(9)
+Gui.frmMsg.cmdOK.Caption("OK")
+Gui.frmMsg.cmdOK.Event(Click,cmdOK_Click)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+V.Global.sKey.Declare
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.Try
+V.Local.sSQL.Declare
+V.Local.sJS.Declare
+'TJS, June 2020
+'Customer: Jones Metal
+'Business Case: The company has specific PQP plans[in an excel file format] for each part/router. The Excel template for the PQP plan is attached to the part in document control. They want to be able to create a dedicated copy for the the PQP plan from template of the associated part/router when a work order is created. They also want to open the PQP excel file associated with the WO automatically when clocking into a job on the GUI if there is one attached.
+'Solution: We will enable this solution by using document control links. The company will add the template associated with the part in a dedicated folder and link it to the router in document control under the PQP Node. We will create a program to create a dedicated copy of the PQP plan from the template when a WO is created using the router. Another program will prompt the user to open the PQP file when clocking into a job at the GUI.
+'Hooks: 16651, WO Post-Save Hook (V.Passed.009000 (WO),V.Passed.009001 (SUFFIX)), Hooks: 17261, BOM WO Post Process Hook (V.Passed.009000 (WO),V.Passed.009001 (SUFFIX))
+'Associated project: GCG_6006_LAUNCH_PQP.g2u
+
+F.Intrinsic.Control.If(V.Caller.Hook,=,16651,"OR",V.Caller.Hook,=,17261)
+	F.ODBC.Connection!conts.OpenCompanyConnection
+	
+	F.Intrinsic.String.Build("{0}{1}",V.Passed.009000.Trim,V.Passed.009001,V.Local.sJS)
+	
+	F.Intrinsic.String.Build("Select LINK_ID from LINK_DATA where RTRIM(ID) = '{0}' and TYPE = '00020'",V.Local.sJS,V.Local.sSQL)
+	F.ODBC.Connection!conts.ExecuteAndReturn(V.Local.sSQL,V.Local.sSQL)
+	
+	F.Intrinsic.Control.If(V.Local.sSQL.Trim,<>,"")
+		F.ODBC.Connection!conts.Close
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.String.Build("Select RTRIM(PART) as PART from V_JOB_HEADER where JOB = '{0}' and SUFFIX = '{1}'",V.Passed.009000,V.Passed.009001,V.Local.sSQL)
+	F.ODBC.Connection!conts.ExecuteAndReturn(V.Local.sSQL,V.Local.sSQL)
+	F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF)
+		F.ODBC.Connection!conts.Close
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.String.Build("Select LINK_ID from LINK_DATA where RTRIM(ID) = '{0}' and TYPE = '00030'",V.Local.sSQL.Trim,V.Local.sSQL)
+	F.ODBC.Connection!conts.ExecuteAndReturn(V.Local.sSQL,V.Local.sSQL)
+	F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF)
+		F.ODBC.Connection!conts.Close
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.CallSub(CopyTemplate,"LINKID",V.Local.sSQL.long)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.CopyTemplate.Start
+F.Intrinsic.Control.Try
+V.Local.sSQL.Declare
+
+F.Intrinsic.String.Build("Select RTRIM(PATH) as PATH,RTRIM(FILE) as FILE from ATG_DOC_ASSOC where LINK_ID = '{0}' and FILE_TYPE in ('XLS','XLSX') and GRP_ID = '5'",V.Args.LINKID,V.Local.sSQL)
+F.Data.DataTable.CreateFromSQL("dtTemplates","conts",V.Local.sSQL,True)
+
+F.Data.DataTable.AddColumn("dtTemplates","SELECT","Boolean",0)
+
+F.Intrinsic.Control.If(V.DataTable.dtTemplates.RowCount,>,1)
+	F.Intrinsic.Control.CallSub(MsgGrid)
+	F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.Else
+	F.Intrinsic.Control.If(V.DataTable.dtTemplates.RowCount,=,0)
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+F.Data.DataTable.SetValue("dtTemplates",-1,"SELECT",True)
+
+F.Intrinsic.Control.CallSub(cmdOK_Click)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.CopyTemplate.End
+
+Program.Sub.MsgGrid.Start
+F.Intrinsic.Control.Try
+
+Gui.frmMsg.GsGcTemplate.AddGridviewFromDatatable("gvTemplates","dtTemplates")
+Gui.frmMsg.GsGcTemplate.MainView("gvTemplates")
+
+Gui.frmMsg.GsGcTemplate.SetGridviewProperty("gvTemplates","ReadOnly",True)
+Gui.frmMsg.GsGcTemplate.SetGridviewProperty("gvTemplates","Editable",False)
+
+F.Intrinsic.Control.CallSub(SetIcon)
+
+Gui.frmMsg..Show
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.MsgGrid.End
+
+Program.Sub.GsGcTemplate_RowCellClick.Start
+F.Intrinsic.Control.Try
+
+'Toggles checkboxes based on user clicks
+F.Intrinsic.Control.If(V.Args.COLUMN,=,"SELECT")
+	F.Intrinsic.Control.If(V.Args.CELLVALUE,=,False)
+		Gui.frmMsg.GsGcTemplate.SetCellValueByColumnName("gvTemplates","SELECT",V.Args.ROWINDEX,"True")
+	F.Intrinsic.Control.Else
+		Gui.frmMsg.GsGcTemplate.SetCellValueByColumnName("gvTemplates","SELECT",V.Args.ROWINDEX,"False")
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.GsGcTemplate_RowCellClick.End
+
+Program.Sub.cmdOK_Click.Start
+F.Intrinsic.Control.Try
+V.Local.sInPath.Declare
+V.Local.sInFile.Declare
+V.Local.sOutPath.Declare
+V.Local.sOutFile.Declare
+V.Local.sOut.Declare
+V.Local.sExtension.Declare
+
+F.Data.DataView.Create("dtTemplates","dvTempFilt",22,"SELECT = 1","")
+
+F.Intrinsic.Control.If(V.DataView.dtTemplates!dvTempFilt.RowCount,=,0)
+	F.Intrinsic.UI.Msgbox("Please select a template to use.","No template selected")
+	F.Data.DataView.Close("dtTemplates","dvTempFilt")
+	F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.ElseIf(V.DataView.dtTemplates!dvTempFilt.RowCount,>,1)
+	F.Intrinsic.UI.Msgbox("Please select only one template to use.","Multiple templates selected")
+	F.Data.DataView.Close("dtTemplates","dvTempFilt")
+	F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.EndIf
+
+V.Local.sInPath.Set(V.DataView.dtTemplates!dvTempFilt(0).PATH!FieldValTrim)
+V.Local.sInFile.Set(V.DataView.dtTemplates!dvTempFilt(0).FILE!FieldValTrim)
+V.Local.sExtension.Set(V.Local.sInFile)
+
+F.Intrinsic.String.Split(V.Local.sExtension,".",V.Local.sExtension)
+F.Intrinsic.Variable.RemoveArrayElementByOrdinal(V.Local.sExtension,0,V.Local.sExtension)
+
+F.Intrinsic.String.Build("{0}{1}",V.Local.sInPath,V.Local.sInFile,V.Local.sInFile)
+
+V.Local.sOutPath.Set("\\jmp-fs01\Quality\Production Quality Plans (Completed)\")
+F.Intrinsic.String.Build("{0}-{1}.{2}",V.Passed.009000,V.Passed.009001,V.Local.sExtension.LCase,V.Local.sOutFile)
+F.Intrinsic.String.Build("{0}{1}",V.Local.sOutPath,V.Local.sOutFile,V.Local.sOut)
+
+F.Intrinsic.File.CopyFile(V.Local.sInFile,V.Local.sOut)
+
+F.Intrinsic.Control.CallSub(DocLink,"sPath",V.Local.sOutPath,"sFile",V.Local.sOutFile,"sExtension",V.Local.sExtension)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.cmdOK_Click.End
+
+Program.Sub.DocLink.Start
+F.Intrinsic.Control.Try
+V.Local.sType.Declare
+V.Local.sKey.Declare
+V.Local.iRef.Declare
+V.Local.sDesc.Declare
+V.Local.sRet.Declare
+V.Local.sSQL.Declare
+
+'Setting type to WO Header for document linking
+V.Local.sType.Set("20")
+F.Intrinsic.String.Build("{0}{1}",V.Passed.009000.Trim,V.Passed.009001.Trim,V.Local.sKey)
+
+F.Intrinsic.String.LPad(V.Local.sType,"0",5,V.Local.sType)
+
+F.Global.DocumentControl.CreateReference(V.Local.sKey,V.local.sType,V.local.iRef)
+
+F.Intrinsic.String.Build("Insert into ATG_DOC_ASSOC (LINK_ID,FILE_TYPE,PATH,FILE,GRP_ID,INV_NON_REV) values ('{0}','{1}','{2}','{3}',5,0)",V.Local.iRef,V.Args.sExtension,V.Args.sPath,V.Args.sFile,V.Local.sSQL)
+F.ODBC.Connection!conts.Execute(V.Local.sSQL)
+
+F.ODBC.Connection!conts.Close
+
+F.Intrinsic.Control.End
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.DocLink.End
+
+Program.Sub.SetIcon.Start
+F.Intrinsic.Control.Try
+V.Local.sForm.Declare
+V.Local.bExists.Declare
+V.Local.sIcon.Declare
+V.Local.iCounter.Declare
+
+F.Intrinsic.String.Build("{0}\ART\gss2.ico",V.Caller.GlobalDir,v.Local.sIcon)
+F.Intrinsic.File.Exists(V.Local.sIcon, V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists.Not)
+    F.Intrinsic.String.Build("{0}\GAB\GAS\gss2.ico",V.Caller.PluginsDir,v.Local.sIcon)
+    F.Intrinsic.File.Exists(V.Local.sIcon, V.Local.bExists)
+    F.Intrinsic.Control.If(V.Local.bExists.Not)
+        F.Intrinsic.Control.ExitSub
+    F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.UI.GetFormList(V.Local.sForm)
+F.Intrinsic.String.Split(V.Local.sForm, "*!*", V.Local.sForm)
+
+F.Intrinsic.Control.For(V.Local.iCounter, 0, V.Local.sForm.UBound, 1)
+    Gui.[V.Local.sForm(V.Local.iCounter)]..Icon(V.Local.sIcon)
+F.Intrinsic.Control.Next(V.Local.iCounter)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.SetIcon.End
+
+Program.Sub.Error.Start
+V.Local.sError.Declare
+V.Local.iRet.Declare
+V.Local.sSep.Declare
+
+F.Intrinsic.String.Build("-------------------------------------------------------------------------------------",,V.Local.sSep)
+F.Intrinsic.String.Build("({5}-{6}){0}{7}{0}Project: {4}{0}{7}{0}Sub: {1}{0}Error: {2}, {3}", V.Ambient.NewLine, V.Args.SubRoutine, V.Args.eNumber, V.Args.eDescription,V.Caller.ScriptFile,V.Ambient.Date, V.Ambient.Time,V.Local.sSep,V.Local.sError)
+F.Intrinsic.UI.Msgbox(V.Local.sError,"Error",V.Local.iRet)
+Program.Sub.Error.End
