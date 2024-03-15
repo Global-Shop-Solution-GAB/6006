@@ -1,0 +1,98 @@
+Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.Try
+V.Local.sSQL.Declare
+V.Local.iHwnd.Declare
+V.Local.sJobs.Declare
+V.Local.iCnt.Declare
+'TJS, June 2020
+'Customer: Jones Metal
+'Business Case: The company has specific PQP plans[in an excel file format] for each part/router. The Excel template for the PQP plan is attached to the part in document control. They want to be able to create a dedicated copy for the the PQP plan from template of the associated part/router when a work order is created. They also want to open the PQP excel file associated with the WO automatically when clocking into a job on the GUI if there is one attached.
+'Solution: We will enable this solution by using document control links. The company will add the template associated with the part in a dedicated folder and link it to the router in document control under the PQP Node. We will create a program to create a dedicated copy of the PQP plan from the template when a WO is created using the router. Another program will prompt the user to open the PQP file when clocking into a job at the GUI.
+'Hooks: 16651, WO Post-Save Hook (V.Passed.009000 (WO),V.Passed.009001 (SUFFIX))
+'Associated project: GCG_6006_COPY_PQP.g2u
+'Hook 15935, V.Passed.009990 (WO), 009991 (SUFF)
+
+'Flex Schedule Start 15756, V.Passed.009990 (Flex Schedule), V.Passed.009991 (Flex Schedule Suffix)
+
+F.ODBC.Connection!conts.OpenCompanyConnection
+
+F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+	F.Intrinsic.Control.Case("15935")
+		F.Intrinsic.String.Build("Select LINK_ID from LINK_DATA where RTRIM(ID) = '{0}{1}' and TYPE = '00020'",V.Passed.009990,V.Passed.009991,V.Local.sSQL)
+		F.ODBC.Connection!conts.ExecuteAndReturn(V.Local.sSQL,V.Local.sSQL)
+		
+		F.Intrinsic.Control.If(V.Local.sSQL.Trim,=,"")
+			F.Intrinsic.Control.End
+		F.Intrinsic.Control.EndIf
+		
+		F.Intrinsic.UI.InvokeWaitDialog("Please wait","Opening PQP",V.Local.iHwnd)
+		
+		F.Intrinsic.Control.CallSub(OpenPQP,"sID",V.Local.sSQL.Long)
+
+	F.Intrinsic.Control.Case("15756")
+		F.Intrinsic.String.Build("Select distinct RTRIM(JOB)+RTRIM(SUFFIX) as JS from V_JOB_CT_FLX_SCHD where LTRIM(RTRIM(SCHEDULE)) = '{0}' and LTRIM(RTRIM(SCHEDULE_SUFFIX)) = '{1}' and SELECT_SO <> 'B'",V.Passed.009990,V.Passed.009991,V.Local.sSQL)
+		F.ODBC.Connection!conts.ExecuteAndReturn(V.Local.sSQL,V.Local.sSQL)
+		F.Intrinsic.String.Split(V.Local.sSQL,"#$#",V.Local.sJobs)
+		
+		F.Intrinsic.Control.For(V.Local.iCnt,V.Local.sJobs.LBound,V.Local.sJobs.UBound,1)
+			F.Intrinsic.String.Build("Select LINK_ID from LINK_DATA where RTRIM(ID) = '{0}' and TYPE = '00020'",V.Local.sJobs(V.Local.iCnt),V.Local.sSQL)
+			F.ODBC.Connection!conts.ExecuteAndReturn(V.Local.sSQL,V.Local.sSQL)
+			
+			F.Intrinsic.Control.If(V.Local.sSQL.Trim,=,"")
+				F.Intrinsic.Control.Next(V.Local.iCnt)
+			F.Intrinsic.Control.EndIf
+		
+			F.Intrinsic.UI.InvokeWaitDialog("Please wait","Opening PQP",V.Local.iHwnd)
+		
+			F.Intrinsic.Control.CallSub(OpenPQP,"sID",V.Local.sSQL.Long)
+		F.Intrinsic.Control.Next(V.Local.iCnt)
+F.Intrinsic.Control.EndSelect
+
+F.ODBC.Connection!conts.Close
+F.Intrinsic.Control.End
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.OpenPQP.Start
+F.Intrinsic.Control.Try
+V.Local.sSQL.Declare
+V.Local.sPath.Declare
+V.Local.sFullPath.Declare
+V.Local.sFile.Declare
+
+F.Intrinsic.String.Build("Select RTRIM(PATH) as PATH,RTRIM(FILE) as FILE from ATG_DOC_ASSOC where LINK_ID = '{0}' and FILE_TYPE in ('XLS','XLSX') and GRP_ID = 5 ",V.Args.sID,V.Local.sSQL)
+F.ODBC.Connection!conts.ExecuteAndReturn(V.Local.sSQL,V.Local.sSQL)
+
+F.Intrinsic.Control.If(V.Local.sSQL.Trim,=,"")
+	F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.String.Split(V.Local.sSQL,"*!*",V.Local.sSQL)
+
+V.Local.sPath.Set(V.Local.sSQL(0).Trim)
+V.Local.sFile.Set(V.Local.sSQL(1).Trim)
+
+F.Intrinsic.String.Build("{0}{1}",V.Local.sPath,V.Local.sFile,V.Local.sFullPath)
+
+F.Intrinsic.Task.ShellExec(0,"",V.Local.sFullPath,"","",1)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.OpenPQP.End
+
+Program.Sub.Error.Start
+V.Local.sError.Declare
+V.Local.iRet.Declare
+V.Local.sSep.Declare
+
+F.Intrinsic.String.Build("-------------------------------------------------------------------------------------",,V.Local.sSep)
+F.Intrinsic.String.Build("({5}-{6}){0}{7}{0}Project: {4}{0}{7}{0}Sub: {1}{0}Error: {2}, {3}", V.Ambient.NewLine, V.Args.SubRoutine, V.Args.eNumber, V.Args.eDescription,V.Caller.ScriptFile,V.Ambient.Date, V.Ambient.Time,V.Local.sSep,V.Local.sError)
+F.Intrinsic.UI.Msgbox(V.Local.sError,"Error",V.Local.iRet)
+Program.Sub.Error.End
